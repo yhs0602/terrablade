@@ -7,33 +7,36 @@ HOST, PORT = "127.0.0.1", 7777
 def build_packet(msg_type: int, payload_dict=None) -> bytes:
     payload_dict = payload_dict or {}
     payload = payload_structs[msg_type].build(payload_dict)
-    length = 1 + len(payload)  # type(1) + payload
-    return struct.pack("<IB", length, msg_type) + payload
+    length = 1 + len(payload)  # type + payload (UInt16)
+    return struct.pack("<HB", length, msg_type) + payload
 
 
 def recv_exact(sock, n):
+    # print(f"Receiving {n} bytes")
     buf = b""
     while len(buf) < n:
         chunk = sock.recv(n - len(buf))
+        # print(f"Received chunk: {chunk}")
         if not chunk:
-            raise ConnectionError("disconnected")
+            raise ConnectionError(f"disconnected, {len(buf)}/{n}")
         buf += chunk
     return buf
 
 
 def recv_message(sock):
     # read length, then rest
-    length_bytes = recv_exact(sock, 4)
-    (length,) = struct.unpack("<i", length_bytes)
-    body = recv_exact(sock, length)  # includes 1-byte type
+    length_bytes = recv_exact(sock, 2)
+    (length,) = struct.unpack("<h", length_bytes)
+    body = recv_exact(sock, length - 2)  # includes 1-byte type
     packet = length_bytes + body  # TerrariaMessage expects length+type+payload
+    # print(f"Packet: {packet} with length {length}")
     return TerrariaMessage.parse(packet)
 
 
 def send(sock, msg_type, payload=None):
     packet = build_packet(msg_type, payload)
-    print(f"Sending packet: {msg_type} {payload}")
-    print(f"Packet: {packet}")
+    # print(f"Sending packet: {msg_type} {payload}")
+    # print(f"Packet: {packet}")
     sock.sendall(packet)
 
 
@@ -41,7 +44,7 @@ def login():
     with socket.create_connection((HOST, PORT)) as s:
         # $01 Connect Request: "Terraria<version>"
         send(
-            s, 0x01, {"version": "Terraria1449"}
+            s, 0x01, {"version": "Terraria279"}
         )  # 예시 버전 문자열 (https://seancode.com/terrafirma/net.html)
         print("Connected to server")
 
@@ -66,9 +69,14 @@ def login():
             s,
             0x04,
             {
-                "player_slot": 0,
-                "hair_style": 0,
-                "gender": 0,
+                "player_id": 0,
+                "skin_variant": 0,
+                "hair": 0,
+                "name": "Player",
+                "hair_dye": 0,
+                "hide_visuals": 0,
+                "hide_visuals_2": 0,
+                "hide_misc": 0,
                 "hair_color": {"r": 0, "g": 0, "b": 0},
                 "skin_color": {"r": 255, "g": 224, "b": 189},
                 "eye_color": {"r": 64, "g": 64, "b": 64},
@@ -76,18 +84,26 @@ def login():
                 "undershirt_color": {"r": 100, "g": 100, "b": 100},
                 "pants_color": {"r": 100, "g": 100, "b": 100},
                 "shoe_color": {"r": 50, "g": 50, "b": 50},
-                "difficulty": 0,
-                "player_name": "Player",
+                "difficulty_flags": 4,
+                "torch_flags": 24,
             },
         )
+        print("Player Appearance")
+
+        # send client uuid
+        send(s, 0x44, {"client_uuid": "09e9b400-f2f1-461f-b5b3-8d8bb6496b98"})
 
         # $10 Life, $2A Mana, $32 Buffs (응답 기다리지 않고 전송) (https://seancode.com/terrafirma/net.html)
-        send(s, 0x10, {"player_slot": 0, "current_health": 100, "max_health": 100})
-        send(s, 0x2A, {"player_slot": 0, "mana": 20, "max_mana": 20})
-        send(s, 0x32, {"player_slot": 0, "buffs": [0] * 10})
+        send(s, 0x10, {"player_slot": 0, "current_health": 500, "max_health": 500})
+        send(s, 0x2A, {"player_slot": 0, "mana": 200, "max_mana": 200})
+        send(s, 0x32, {"player_slot": 0, "buffs": [0] * 22})
+        print("Life, Mana, Buffs")
+
+        # Don't know what this is
+        send(s, 147, {"loadout": [0, 1, 0, 0]})
 
         # 인벤토리 슬롯 0..72, $05 반복 전송 (https://seancode.com/terrafirma/net.html)
-        for inv in range(73):
+        for inv in range(350):
             send(
                 s,
                 0x05,
@@ -100,9 +116,10 @@ def login():
                 },
             )
 
+        print("Sent Inventory")
         # $06 World Info 요청 (https://seancode.com/terrafirma/net.html)
         send(s, 0x06)
-
+        print("World Info Request")
         # 서버는 문제 있으면 $02로 킥. 정상이면 $07 응답 후 Initialized(2)로 승격 (https://seancode.com/terrafirma/net.html)
         world_info = None
         while True:
@@ -112,7 +129,8 @@ def login():
             if msg.type == 0x07:
                 world_info = msg.payload
                 break
-
+            print(f"World Info Response: {msg}")
+        print(f"World Info Response: {world_info}")
         # $08 초기 타일 데이터 요청. $07에서 받은 스폰 X,Y 사용 (https://seancode.com/terrafirma/net.html)
         send(
             s,

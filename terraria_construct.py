@@ -18,13 +18,14 @@ protocol specification.
 """
 
 from construct import (
+    Int16ul,
+    PascalString,
     Struct,
     Byte,
     Int16sl,
     Int32sl,
     Float32l,
     Array,
-    GreedyString,
     GreedyBytes,
     Switch,
     FixedSized,
@@ -52,33 +53,41 @@ NPCBuff = Struct(
 # -------------------------------------------------------------------------------
 
 payload_structs = {
-    # $01 — Connect Request【588973514146224†L46-L56】
-    0x01: Struct("version" / GreedyString("ascii")),
-    # $02 — Fatal Error【588973514146224†L57-L66】
-    0x02: Struct("error" / GreedyString("ascii")),
-    # $03 — Connection Approved【588973514146224†L67-L76】
+    # $01 — Connect Request
+    0x01: Struct("version" / PascalString(lengthfield=Byte, encoding="ascii")),
+    # $02 — Fatal Error
+    0x02: Struct("error" / PascalString(lengthfield=Byte, encoding="ascii")),
+    # $03 — Connection Approved
     0x03: Struct(
         "player_slot" / Byte,
     ),
     # $04 — Player Appearance【588973514146224†L78-L97】
     0x04: Struct(
-        "player_slot" / Byte,
-        "hair_style" / Byte,
-        "gender" / Byte,
-        "hair_color" / Color,
+        "player_id" / Byte,  # Player ID
+        "skin_variant" / Byte,  # Skin Varient
+        "hair" / Byte,  # >162면 서버가 0으로 클램프
+        "name"
+        / PascalString(
+            lengthfield=Byte, encoding="ascii"
+        ),  # String (7-bit length-prefixed)
+        "hair_dye" / Byte,
+        "hide_visuals" / Byte,
+        "hide_visuals_2" / Byte,
+        "hide_misc" / Byte,
+        "hair_color" / Color,  # 3 bytes RGB
         "skin_color" / Color,
         "eye_color" / Color,
         "shirt_color" / Color,
         "undershirt_color" / Color,
         "pants_color" / Color,
         "shoe_color" / Color,
-        "difficulty" / Byte,
-        "player_name" / GreedyString("ascii"),
+        "difficulty_flags" / Byte,  # bitflags
+        "torch_flags" / Byte,  # bitflags
     ),
     # $05 — Set Inventory【588973514146224†L112-L126】
     0x05: Struct(
         "player_slot" / Byte,
-        "inventory_slot" / Byte,
+        "inventory_slot" / Int16sl,
         "stack" / Int16sl,
         "prefix_id" / Byte,
         "item_id" / Int16sl,
@@ -113,7 +122,7 @@ payload_structs = {
         "flags_1" / Byte,
         "flags_2" / Byte,
         "max_rain" / Float32l,
-        "world_name" / GreedyString("ascii"),
+        "world_name" / PascalString(lengthfield=Byte, encoding="ascii"),
     ),
     # $08 — Request initial tile data【588973514146224†L201-L213】
     0x08: Struct(
@@ -123,7 +132,7 @@ payload_structs = {
     # $09 — Statusbar text【588973514146224†L214-L225】
     0x09: Struct(
         "num_messages" / Int32sl,
-        "status_text" / GreedyString("ascii"),
+        "status_text" / PascalString(lengthfield=Byte, encoding="ascii"),
     ),
     # $0A — Tile Row Data (variable tile data)【588973514146224†L233-L275】
     0x0A: Struct(
@@ -240,7 +249,7 @@ payload_structs = {
     0x19: Struct(
         "player_slot" / Byte,
         "text_color" / Color,
-        "chat_text" / GreedyString("ascii"),
+        "chat_text" / PascalString(lengthfield=Byte, encoding="ascii"),
     ),
     # $1A — Damage Player or PvP【588973514146224†L604-L617】
     0x1A: Struct(
@@ -249,7 +258,7 @@ payload_structs = {
         "damage" / Int16sl,
         "pvp" / Byte,
         "critical" / Byte,
-        "death_text" / GreedyString("ascii"),
+        "death_text" / PascalString(lengthfield=Byte, encoding="ascii"),
     ),
     # $1B — Update Projectile【588973514146224†L627-L645】
     0x1B: Struct(
@@ -320,7 +329,7 @@ payload_structs = {
     0x25: Struct(),
     # $26 — Login with Password【588973514146224†L842-L848】
     0x26: Struct(
-        "password" / GreedyString("ascii"),
+        "password" / PascalString(lengthfield=Byte, encoding="ascii"),
     ),
     # $27 — Unassign item【588973514146224†L850-L858】
     0x27: Struct(
@@ -354,7 +363,7 @@ payload_structs = {
         "hit_direction" / Byte,
         "damage" / Int16sl,
         "pvp" / Byte,
-        "death_message" / GreedyString("ascii"),
+        "death_message" / PascalString(lengthfield=Byte, encoding="ascii"),
     ),
     # $2D — Change Party【588973514146224†L965-L979】
     0x2D: Struct(
@@ -371,7 +380,7 @@ payload_structs = {
         "sign_slot" / Int16sl,
         "sign_x" / Int32sl,
         "sign_y" / Int32sl,
-        "sign_text" / GreedyString("ascii"),
+        "sign_text" / PascalString(lengthfield=Byte, encoding="ascii"),
     ),
     # $30 — Adjust Liquid【588973514146224†L1021-L1032】
     0x30: Struct(
@@ -385,7 +394,7 @@ payload_structs = {
     # $32 — Set Player Buffs【588973514146224†L1049-L1058】
     0x32: Struct(
         "player_slot" / Byte,
-        "buffs" / Array(10, Byte),
+        "buffs" / Array(22, Int16ul),
     ),
     # $33 — Old Man's Answer【588973514146224†L1071-L1080】
     0x33: Struct(
@@ -419,7 +428,7 @@ payload_structs = {
     # $38 — Set NPC Name【588973514146224†L1166-L1174】
     0x38: Struct(
         "npc_slot" / Int16sl,
-        "npc_name" / GreedyString("ascii"),
+        "npc_name" / PascalString(lengthfield=Byte, encoding="ascii"),
     ),
     # $39 — Sets Balance Stats【588973514146224†L1176-L1185】
     0x39: Struct(
@@ -479,7 +488,13 @@ payload_structs = {
     ),
     # $44 — Unknown【588973514146224†L1351-L1358】
     0x44: Struct(
-        "data" / GreedyString("ascii"),
+        "client_uuid" / PascalString(lengthfield=Byte, encoding="ascii"),
+    ),
+    82: Struct(
+        "network_something" / Array(4, Byte),
+    ),
+    147: Struct(
+        "loadout" / Array(4, Byte),
     ),
 }
 
@@ -492,11 +507,11 @@ payload_structs = {
 # excludes the 4‑byte length prefix【588973514146224†L27-L33】.  FixedSized ensures that the
 # payload parser consumes exactly (length ‑ 1) bytes for the chosen message type.
 TerrariaMessage = Struct(
-    "length" / Int32sl,
+    "length" / Int16ul,
     "type" / Byte,
     "payload"
     / FixedSized(
-        lambda this: this.length - 1,
+        lambda this: this.length - 3,
         Switch(lambda this: this.type, payload_structs, default=GreedyBytes),
     ),
 )

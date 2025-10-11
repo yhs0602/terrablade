@@ -18,9 +18,12 @@ protocol specification.
 """
 
 from construct import (
+    Computed,
+    If,
     Int16ul,
     Int64ul,
     Int8sl,
+    Optional,
     PascalString,
     Struct,
     Byte,
@@ -287,11 +290,25 @@ payload_structs = {
         "position_y" / Float32l,
         "velocity_x" / Float32l,
         "velocity_y" / Float32l,
-        "target" / Byte,
-        "flags" / Byte,
-        "life" / Int32sl,
-        "ai" / Array(4, Float32l),
+        "target" / Int16sl,
+        "flags1" / Byte,
+        "flags2" / Byte,
+        "ai0" / If(lambda this: this.flags1 & 0x04, Float32l),
+        "ai1" / If(lambda this: this.flags1 & 0x08, Float32l),
+        "ai2" / If(lambda this: this.flags1 & 0x10, Float32l),
+        "ai3" / If(lambda this: this.flags1 & 0x20, Float32l),
+        "ai" / Computed(lambda this: [this.ai0, this.ai1, this.ai2, this.ai3]),
         "npc_id" / Int16sl,
+        "player_count_for_multiplayer_difficulty_override" / Optional(Byte),
+        "strength_multiplier" / Optional(Float32l),
+        "life_bytes" / Optional(Byte),
+        "life_byte" / If(lambda this: this.life_bytes == 1 and this.flags1 & 128, Byte),
+        "life_int16"
+        / If(lambda this: this.life_bytes == 2 and this.flags1 & 128, Int16ul),
+        "life_int32"
+        / If(lambda this: this.life_bytes == 4 and this.flags1 & 128, Int32sl),
+        # "life" / Computed(lambda this: this.life_byte if this.life_bytes == 1 else (this.life_int16 if this.life_bytes == 2 else this.life_int32)),
+        "release_owner" / Optional(Byte),
     ),
     # $18 — Strike NPC【588973514146224†L561-L574】
     0x18: Struct(

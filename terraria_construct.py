@@ -19,6 +19,8 @@ protocol specification.
 
 from construct import (
     Int16ul,
+    Int64ul,
+    Int8sl,
     PascalString,
     Struct,
     Byte,
@@ -83,8 +85,9 @@ payload_structs = {
         "shoe_color" / Color,
         "difficulty_flags" / Byte,  # bitflags
         "torch_flags" / Byte,  # bitflags
+        "shimmer_flags" / Byte,  # bitflags
     ),
-    # $05 — Set Inventory【588973514146224†L112-L126】
+    # $05 — Set Inventory
     0x05: Struct(
         "player_slot" / Byte,
         "inventory_slot" / Int16sl,
@@ -92,37 +95,83 @@ payload_structs = {
         "prefix_id" / Byte,
         "item_id" / Int16sl,
     ),
-    # $06 — Request World Information (no payload)【588973514146224†L142-L149】
+    # $06 — Request World Information (no payload)
     0x06: Struct(),
-    # $07 — World Information【588973514146224†L156-L199】
+    # $07 — World Information
     0x07: Struct(
         "game_time" / Int32sl,
-        "day_time" / Byte,
+        "day_and_moon_info" / Byte,
         "moon_phase" / Byte,
-        "blood_moon" / Byte,
-        "eclipse" / Byte,
-        "map_width" / Int32sl,
-        "map_height" / Int32sl,
-        "spawn_tile_x" / Int32sl,
-        "spawn_tile_y" / Int32sl,
-        "ground_level_y" / Int32sl,
-        "rock_layer_y" / Int32sl,
+        "max_tiles_x" / Int16sl,
+        "max_tiles_y" / Int16sl,
+        "spawn_tile_x" / Int16sl,
+        "spawn_tile_y" / Int16sl,
+        "ground_level_y" / Int16sl,
+        "rock_layer_y" / Int16sl,
         "world_id" / Int32sl,
+        "world_name" / PascalString(lengthfield=Byte, encoding="ascii"),
+        "game_time" / Byte,
+        "world_unique_id" / Array(16, Byte),
+        "world_generator_version" / Int64ul,
         "moon_type" / Byte,
-        "tree_x" / Array(3, Int32sl),
-        "tree_style" / Array(4, Byte),
-        "cave_back_x" / Array(3, Int32sl),
-        "cave_back_style" / Array(4, Byte),
-        "background_styles" / Array(8, Byte),
+        "forest_background" / Byte,
+        "forest2_background" / Byte,
+        "forest3_background" / Byte,
+        "forest4_background" / Byte,
+        "corruption_background" / Byte,
+        "jungle_background" / Byte,
+        "snow_background" / Byte,
+        "hallow_background" / Byte,
+        "crimson_background" / Byte,
+        "desert_background" / Byte,
+        "ocean_background" / Byte,
+        "mushroom_background" / Byte,
+        "underworld_background" / Byte,
         "ice_back_style" / Byte,
         "jungle_back_style" / Byte,
         "hell_back_style" / Byte,
-        "wind_speed" / Float32l,
+        "wind_speed_target" / Float32l,
         "num_clouds" / Byte,
-        "flags_1" / Byte,
-        "flags_2" / Byte,
-        "max_rain" / Float32l,
-        "world_name" / PascalString(lengthfield=Byte, encoding="ascii"),
+        "tree_x" / Array(3, Int16sl),
+        "tree_style" / Array(4, Byte),
+        "cave_back_x" / Array(3, Int16sl),
+        "cave_back_style" / Array(4, Byte),
+        "forst_tree_tops" / Byte,
+        "forst2_tree_tops" / Byte,
+        "forst3_tree_tops" / Byte,
+        "forst4_tree_tops" / Byte,
+        "corruption_tree_tops" / Byte,
+        "jungle_tree_tops" / Byte,
+        "snow_tree_tops" / Byte,
+        "hallow_tree_tops" / Byte,
+        "crimson_tree_tops" / Byte,
+        "desert_tree_tops" / Byte,
+        "ocean_tree_tops" / Byte,
+        "mushroom_tree_tops" / Byte,
+        "underworld_tree_tops" / Byte,
+        "max_raining" / Float32l,
+        "event_info_1" / Byte,  # prehard
+        "event_info_2" / Byte,  # mech
+        "event_info_3" / Byte,  # slimeking...
+        "event_info_4" / Byte,  # moonlord...
+        "event_info_5" / Byte,  # pirates...
+        "event_info_6" / Byte,  # combatbook...
+        "event_info_7" / Byte,  # boughtcat...
+        "event_info_8" / Byte,  # 0516world...
+        "event_info_9" / Byte,  # unlock slime spawn...
+        "event_info_10" / Byte,  # no traps...
+        "sundial_cooldown" / Byte,
+        "moondial_coondial" / Byte,
+        "copper" / Int16sl,
+        "iron" / Int16sl,
+        "silver" / Int16sl,
+        "gold" / Int16sl,
+        "cobalt" / Int16sl,
+        "mythril" / Int16sl,
+        "adamantite" / Int16sl,
+        "invasion_type" / Int8sl,
+        "lobby_id" / Int64ul,
+        "sandstorm" / Float32l,
     ),
     # $08 — Request initial tile data【588973514146224†L201-L213】
     0x08: Struct(
@@ -136,9 +185,11 @@ payload_structs = {
     ),
     # $0A — Tile Row Data (variable tile data)【588973514146224†L233-L275】
     0x0A: Struct(
-        "width" / Int16sl,
+        "compressed" / Byte,
         "tile_x" / Int32sl,
         "tile_y" / Int32sl,
+        "width" / Int16sl,
+        "height" / Int16sl,
         # The rest of the payload is variable‑length tile data encoded using flags.
         "tile_data" / GreedyBytes,
     ),
@@ -493,7 +544,7 @@ payload_structs = {
     82: Struct(
         "network_something" / Array(4, Byte),
     ),
-    147: Struct(
+    0x93: Struct(
         "loadout" / Array(4, Byte),
     ),
 }

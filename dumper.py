@@ -1,10 +1,15 @@
 # proxy.py
 import asyncio, binascii, datetime, sys
 
+import construct
+
 from terraria_construct import payload_structs
 
 UP_HOST, UP_PORT = "127.0.0.1", 7778  # 실제 서버
 LISTEN_HOST, LISTEN_PORT = "127.0.0.1", 7777  # 클라이언트가 접속할 포트
+
+construct.setGlobalPrintFullStrings(True)
+# construct.setGlobalPrintLimit(0)
 
 
 class PacketDumper:
@@ -21,7 +26,7 @@ class PacketDumper:
                 return
             length = int.from_bytes(self.buf[:2], "little")
             need = length - 2
-            print(f"{length=}{need=}")
+            # print(f"{length=}{need=}")
             if len(self.buf) < need:
                 return  # 아직 덜 들어옴
 
@@ -41,11 +46,12 @@ class PacketDumper:
                 parsed = f'<unknown type: {msg_type}>; "{payload}"'
 
             ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-            print(f"[{ts}] {self.prefix} type=0x{msg_type:02X} len={length}")
-            print(f"raw: {binascii.hexlify(packet).decode()}")
-            if parsed is not None:
-                print(f"parsed: {parsed}")
-            print(flush=True)
+            if msg_type != 0x05:
+                print(f"[{ts}] {self.prefix} type=0x{msg_type:02X} len={length}")
+                print(f"raw: {binascii.hexlify(packet).decode()}")
+                if parsed is not None:
+                    print(f"parsed: {parsed}")
+                print(flush=True)
 
 
 async def pipe(reader, writer, prefix):

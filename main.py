@@ -1,7 +1,7 @@
 import socket, struct
 from terraria_construct import payload_structs, TerrariaMessage
 
-HOST, PORT = "127.0.0.1", 7777
+HOST, PORT = "127.0.0.1", 7778
 
 
 def build_packet(msg_type: int, payload_dict=None) -> bytes:
@@ -27,9 +27,9 @@ def recv_message(sock):
     # read length, then rest
     length_bytes = recv_exact(sock, 2)
     (length,) = struct.unpack("<h", length_bytes)
-    body = recv_exact(sock, length - 2)  # includes 1-byte type
+    body = recv_exact(sock, length - 2)  #  - 2  # includes 1-byte type
     packet = length_bytes + body  # TerrariaMessage expects length+type+payload
-    # print(f"Packet: {packet} with length {length}")
+    print(f"Packet: {packet} with length {length}")
     return TerrariaMessage.parse(packet)
 
 
@@ -62,7 +62,7 @@ def login():
         assert (
             msg.type == 0x03
         )  # Connection Approved, 이제 상태 Initializing(1) (https://seancode.com/terrafirma/net.html)
-        print("Connection Approved")
+        print(f"Connection Approved: slot={msg.payload.player_slot}")
 
         # $04 Player Appearance
         send(
@@ -70,9 +70,9 @@ def login():
             0x04,
             {
                 "player_id": 0,
-                "skin_variant": 0,
-                "hair": 0,
-                "name": "Player",
+                "skin_variant": 4,
+                "hair": 22,
+                "name": "Lalala",
                 "hair_dye": 0,
                 "hide_visuals": 0,
                 "hide_visuals_2": 0,
@@ -86,12 +86,13 @@ def login():
                 "shoe_color": {"r": 50, "g": 50, "b": 50},
                 "difficulty_flags": 4,
                 "torch_flags": 24,
+                "shimmer_flags": 0,
             },
         )
         print("Player Appearance")
 
         # send client uuid
-        send(s, 0x44, {"client_uuid": "09e9b400-f2f1-461f-b5b3-8d8bb6496b98"})
+        send(s, 0x44, {"client_uuid": "09e9b400-f2f1-461f-b5b3-8d8bb649a94b"})
 
         # $10 Life, $2A Mana, $32 Buffs (응답 기다리지 않고 전송) (https://seancode.com/terrafirma/net.html)
         send(s, 0x10, {"player_slot": 0, "current_health": 500, "max_health": 500})
@@ -99,8 +100,8 @@ def login():
         send(s, 0x32, {"player_slot": 0, "buffs": [0] * 22})
         print("Life, Mana, Buffs")
 
-        # Don't know what this is
-        send(s, 147, {"loadout": [0, 1, 0, 0]})
+        # Don't know what this is 0x93
+        send(s, 0x93, {"loadout": [0, 0, 0, 0]})
 
         # 인벤토리 슬롯 0..72, $05 반복 전송 (https://seancode.com/terrafirma/net.html)
         for inv in range(350):
@@ -129,7 +130,8 @@ def login():
             if msg.type == 0x07:
                 world_info = msg.payload
                 break
-            print(f"World Info Response: {msg}")
+            if msg.type != 0x52:
+                print(f"World Info Other response: {msg}")
         print(f"World Info Response: {world_info}")
         # $08 초기 타일 데이터 요청. $07에서 받은 스폰 X,Y 사용 (https://seancode.com/terrafirma/net.html)
         send(

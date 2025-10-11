@@ -19,12 +19,15 @@ protocol specification.
 
 from construct import (
     Computed,
+    Enum,
     If,
     Int16ul,
     Int64ul,
     Int8sl,
+    LazyBound,
     Optional,
     PascalString,
+    PrefixedArray,
     Struct,
     Byte,
     Int16sl,
@@ -51,6 +54,20 @@ Color = Struct(
 NPCBuff = Struct(
     "buff_type" / Byte,
     "buff_time" / Int16sl,
+)
+
+NetworkTextMode = Enum(Byte, Literal=0, Formattable=1, LocalizationKey=2)
+
+NetworkText = Struct(
+    "mode" / NetworkTextMode,
+    "text" / PascalString(lengthfield=Byte, encoding="ascii"),
+    "substitutions"
+    / If(
+        lambda this: this.mode != "Literal",
+        PrefixedArray(
+            Byte, LazyBound(lambda: NetworkText)
+        ),  # 길이(Byte) + NetworkText[]
+    ),
 )
 
 # -------------------------------------------------------------------------------
@@ -182,11 +199,11 @@ payload_structs = {
         "spawn_x" / Int32sl,
         "spawn_y" / Int32sl,
     ),
-    # $09 — Statusbar text【588973514146224†L214-L225】
+    # $09 — Statusbar text
     0x09: Struct(
         "num_messages" / Int32sl,
-        "status_text" / PascalString(lengthfield=Byte, encoding="ascii"),
-        "number2" / Byte,
+        "status_text" / NetworkText,
+        "status_text_flags" / Byte,
     ),
     # $0A — Tile Row Data (variable tile data)【588973514146224†L233-L275】
     0x0A: Struct(

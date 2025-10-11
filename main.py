@@ -1,13 +1,13 @@
 import socket, struct
 from terraria_construct import payload_structs, TerrariaMessage
 
-HOST, PORT = "127.0.0.1", 7778
+HOST, PORT = "127.0.0.1", 7777
 
 
 def build_packet(msg_type: int, payload_dict=None) -> bytes:
     payload_dict = payload_dict or {}
     payload = payload_structs[msg_type].build(payload_dict)
-    length = 1 + len(payload)  # type + payload (UInt16)
+    length = 3 + len(payload)  # type + payload (UInt16)
     return struct.pack("<HB", length, msg_type) + payload
 
 
@@ -97,7 +97,7 @@ def login():
         # $10 Life, $2A Mana, $32 Buffs (응답 기다리지 않고 전송) (https://seancode.com/terrafirma/net.html)
         send(s, 0x10, {"player_slot": 0, "current_health": 500, "max_health": 500})
         send(s, 0x2A, {"player_slot": 0, "mana": 200, "max_mana": 200})
-        send(s, 0x32, {"player_slot": 0, "buffs": [0] * 22})
+        send(s, 0x32, {"player_slot": 0, "buffs": [0] * 44})
         print("Life, Mana, Buffs")
 
         # Don't know what this is 0x93

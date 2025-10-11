@@ -1,4 +1,5 @@
 # proxy.py
+import io
 import asyncio, binascii, datetime, sys
 
 import construct
@@ -25,8 +26,8 @@ class PacketDumper:
             if len(self.buf) < 2:
                 return
             length = int.from_bytes(self.buf[:2], "little")
-            need = length - 2
-            # print(f"{length=}{need=}")
+            need = length
+            print(f"{length=}{need=}")
             if len(self.buf) < need:
                 return  # 아직 덜 들어옴
 
@@ -36,10 +37,16 @@ class PacketDumper:
             msg_type = packet[2]
             payload = packet[3:]
 
+            assert len(payload) == length - 3
+
             parsed = None
             if msg_type in payload_structs:
                 try:
-                    parsed = payload_structs[msg_type].parse(payload)
+                    stream = io.BytesIO(payload)
+                    parsed = payload_structs[msg_type].parse_stream(stream)
+                    if stream.tell() != len(payload):
+                        print(f"!! leftover {len(payload)-stream.tell()} bytes")
+                        print(f"raw: {binascii.hexlify(stream.getvalue()).decode()}")
                 except Exception as e:
                     parsed = f"<parse error: {e}>"
             else:
@@ -48,7 +55,7 @@ class PacketDumper:
             ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
             if msg_type != 0x05:
                 print(f"[{ts}] {self.prefix} type=0x{msg_type:02X} len={length}")
-                print(f"raw: {binascii.hexlify(packet).decode()}")
+                print(f"raw: {binascii.hexlify(packet).decode()} ({len(packet)} bytes)")
                 if parsed is not None:
                     print(f"parsed: {parsed}")
                 print(flush=True)

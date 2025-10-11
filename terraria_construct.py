@@ -62,6 +62,7 @@ payload_structs = {
     # $03 — Connection Approved
     0x03: Struct(
         "player_slot" / Byte,
+        "some_bool" / Byte,
     ),
     # $04 — Player Appearance【588973514146224†L78-L97】
     0x04: Struct(
@@ -110,7 +111,7 @@ payload_structs = {
         "rock_layer_y" / Int16sl,
         "world_id" / Int32sl,
         "world_name" / PascalString(lengthfield=Byte, encoding="ascii"),
-        "game_time" / Byte,
+        "game_mode" / Byte,
         "world_unique_id" / Array(16, Byte),
         "world_generator_version" / Int64ul,
         "moon_type" / Byte,
@@ -132,9 +133,9 @@ payload_structs = {
         "hell_back_style" / Byte,
         "wind_speed_target" / Float32l,
         "num_clouds" / Byte,
-        "tree_x" / Array(3, Int16sl),
+        "tree_x" / Array(3, Int32sl),
         "tree_style" / Array(4, Byte),
-        "cave_back_x" / Array(3, Int16sl),
+        "cave_back_x" / Array(3, Int32sl),
         "cave_back_style" / Array(4, Byte),
         "forst_tree_tops" / Byte,
         "forst2_tree_tops" / Byte,
@@ -182,6 +183,7 @@ payload_structs = {
     0x09: Struct(
         "num_messages" / Int32sl,
         "status_text" / PascalString(lengthfield=Byte, encoding="ascii"),
+        "number2" / Byte,
     ),
     # $0A — Tile Row Data (variable tile data)【588973514146224†L233-L275】
     0x0A: Struct(
@@ -445,7 +447,7 @@ payload_structs = {
     # $32 — Set Player Buffs【588973514146224†L1049-L1058】
     0x32: Struct(
         "player_slot" / Byte,
-        "buffs" / Array(22, Int16ul),
+        "buffs" / Array(44, Int16ul),
     ),
     # $33 — Old Man's Answer【588973514146224†L1071-L1080】
     0x33: Struct(
@@ -541,7 +543,7 @@ payload_structs = {
     0x44: Struct(
         "client_uuid" / PascalString(lengthfield=Byte, encoding="ascii"),
     ),
-    82: Struct(
+    0x52: Struct(
         "network_something" / Array(4, Byte),
     ),
     0x93: Struct(

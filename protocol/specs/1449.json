@@ -3,8 +3,12 @@
   "base_dir": "1449",
   "decomp_dir": "1.4.4.9-279-Windows-Server",
   "version_string": "Terraria279",
+  "name_len": 20,
   "message_formats": {
     "player_spawn": "v1",
-    "player_controls": "v1"
+    "player_controls": "v1",
+    "sync_player": "v0",
+    "sync_equipment": "v0",
+    "player_buffs": "v0"
   }
 }

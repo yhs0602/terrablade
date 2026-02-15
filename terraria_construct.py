@@ -205,16 +205,8 @@ payload_structs = {
         "status_text" / NetworkText,
         "status_text_flags" / Byte,
     ),
-    # $0A — Tile Row Data (variable tile data)【588973514146224†L233-L275】
-    0x0A: Struct(
-        "compressed" / Byte,
-        "tile_x" / Int32sl,
-        "tile_y" / Int32sl,
-        "width" / Int16sl,
-        "height" / Int16sl,
-        # The rest of the payload is variable‑length tile data encoded using flags.
-        "tile_data" / GreedyBytes,
-    ),
+    # $0A — Tile Data Block (deflate stream; decode in client)
+    0x0A: GreedyBytes,
     # $0B — Recalculate U/V【588973514146224†L277-L289】
     0x0B: Struct(
         "start_x" / Int32sl,
@@ -520,10 +512,10 @@ payload_structs = {
         "buff_type" / Byte,
         "buff_time" / Int16sl,
     ),
-    # $36 — Set NPC Buffs【588973514146224†L1130-L1145】
+    # $36 — Player Zones (payload size varies by version; parse leniently)
     0x36: Struct(
-        "npc_slot" / Int16sl,
-        "npc_buffs" / Array(5, NPCBuff),
+        "player_slot" / Byte,
+        "zone_payload" / GreedyBytes,
     ),
     # $37 — Add Player Buff【588973514146224†L1146-L1155】
     0x37: Struct(

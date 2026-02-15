@@ -12,6 +12,7 @@ class VersionSpec:
     decomp_dir: Path
     version_string: str
     tile_frame_important: set[int]
+    name_len: int
     message_formats: dict
 
 
@@ -112,6 +113,7 @@ def resolve_spec(
         decomp_dir=decomp_dir,
         version_string=version_string,
         tile_frame_important=tile_frame_important,
+        name_len=spec.get("name_len", 20),
         message_formats=spec.get("message_formats", {}),
     )
 

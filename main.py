@@ -4,14 +4,51 @@ import argparse
 import time
 import select
 import zlib
+import binascii
 from pathlib import Path
 from typing import Optional
+from types import SimpleNamespace
 from terraria_construct import payload_structs, TerrariaMessage
 from protocol import VersionSpec, resolve_spec
 
 HOST, PORT = "127.0.0.1", 7777
 NET_TEXT_MODULE_ID = 1  # NetworkInitializer: NetLiquidModule(0), NetTextModule(1)
 _WARNED_FRAME_IMPORTANT = False
+DEBUG = False
+DEBUG_HEX = False
+DEBUG_INCLUDE_TILES = False
+
+
+def _should_log_type(msg_type: int) -> bool:
+    if DEBUG_INCLUDE_TILES:
+        return True
+    return msg_type != 0x0A
+
+
+def log_packet(direction: str, packet: bytes):
+    if not DEBUG:
+        return
+    if len(packet) < 3:
+        print(f"[{direction}] short packet len={len(packet)}")
+        if DEBUG_HEX:
+            print(binascii.hexlify(packet).decode())
+        return
+    length = int.from_bytes(packet[:2], "little")
+    msg_type = packet[2]
+    if not _should_log_type(msg_type):
+        return
+    print(f"[{direction}] type=0x{msg_type:02X} len={length}")
+    if msg_type == 0x52 and length >= 5:
+        module_id = int.from_bytes(packet[3:5], "little")
+        module_payload = packet[5:length]
+        print(
+            f"[{direction}] netmodule id={module_id} payload_len={len(module_payload)}"
+        )
+        if module_id == 0 and len(module_payload) >= 2:
+            change_count = int.from_bytes(module_payload[:2], "little")
+            print(f"[{direction}] netmodule(NetLiquid) changes={change_count}")
+    if DEBUG_HEX:
+        print(binascii.hexlify(packet).decode())
 
 
 def build_packet(msg_type: int, payload_dict=None) -> bytes:
@@ -94,6 +131,15 @@ class ByteReader:
         return read_dotnet_string(self)
 
 
+def _decompress_tile_block(payload: bytes) -> bytes:
+    # Tile blocks are deflate-compressed with zlib header in 1.4.4+.
+    try:
+        return zlib.decompress(payload)
+    except zlib.error:
+        # fallback: raw deflate (older captures or malformed)
+        return zlib.decompress(payload, wbits=-15)
+
+
 def parse_tile_section(payload: bytes, tile_frame_important: set[int]):
     # 0x0A payload is deflate-compressed
     global _WARNED_FRAME_IMPORTANT
@@ -103,7 +149,7 @@ def parse_tile_section(payload: bytes, tile_frame_important: set[int]):
                 "Warning: tileFrameImportant list missing; skipping tile parse (store no tiles)."
             )
             _WARNED_FRAME_IMPORTANT = True
-        data = zlib.decompress(payload, wbits=-15)
+        data = _decompress_tile_block(payload)
         r = ByteReader(data)
         x_start = r.read_int32()
         y_start = r.read_int32()
@@ -116,7 +162,7 @@ def parse_tile_section(payload: bytes, tile_frame_important: set[int]):
             "height": height,
             "tiles": {},
         }
-    data = zlib.decompress(payload, wbits=-15)
+    data = _decompress_tile_block(payload)
     r = ByteReader(data)
     x_start = r.read_int32()
     y_start = r.read_int32()
@@ -227,7 +273,16 @@ class PacketStream:
             return None
         packet = bytes(self.buf[:length])
         del self.buf[:length]
-        return TerrariaMessage.parse(packet)
+        log_packet("S→C", packet)
+        try:
+            return TerrariaMessage.parse(packet)
+        except Exception as e:
+            if DEBUG:
+                msg_type = packet[2] if len(packet) >= 3 else None
+                print(f"Parse error for type=0x{msg_type:02X}: {e}")
+            msg_type = packet[2] if len(packet) >= 3 else 0
+            payload = packet[3:] if len(packet) >= 3 else b""
+            return SimpleNamespace(type=msg_type, payload=SimpleNamespace(raw=payload))
 
     def recv_message(self):
         while True:
@@ -287,8 +342,11 @@ class WorldState:
 
 def send(sock, msg_type, payload=None):
     packet = build_packet(msg_type, payload)
-    # print(f"Sending packet: {msg_type} {payload}")
-    # print(f"Packet: {packet}")
+    send_raw(sock, packet)
+
+
+def send_raw(sock, packet: bytes):
+    log_packet("C→S", packet)
     sock.sendall(packet)
 
 
@@ -423,9 +481,7 @@ def move_right_loop(
         for msg in stream.poll_messages():
             if msg.type == 0x0A:
                 try:
-                    section = parse_tile_section(
-                        msg.payload.tile_data, tile_frame_important
-                    )
+                    section = parse_tile_section(msg.payload, tile_frame_important)
                     state.update_tile_section(section)
                 except Exception as e:
                     print(f"Tile section parse failed: {e}")
@@ -459,7 +515,7 @@ def move_right_loop(
             vel_x=speed if moving else 0.0,
             vel_y=0.0,
         )
-        sock.sendall(packet)
+        send_raw(sock, packet)
         time.sleep(tick)
 
     # stop movement
@@ -473,7 +529,7 @@ def move_right_loop(
         selected_item=0,
         send_velocity=False,
     )
-    sock.sendall(packet)
+    send_raw(sock, packet)
 
 
 def send_chat(sock, text: str):
@@ -481,7 +537,84 @@ def send_chat(sock, text: str):
     # ChatCommandId for SayChatCommand is "Say".
     payload = write_dotnet_string("Say") + write_dotnet_string(text)
     packet = build_netmodule_packet(NET_TEXT_MODULE_ID, payload)
-    sock.sendall(packet)
+    send_raw(sock, packet)
+
+
+def _pack_color(c: dict) -> bytes:
+    return struct.pack("<BBB", c["r"], c["g"], c["b"])
+
+
+def build_sync_player_packet(profile: VersionSpec, payload: dict) -> bytes:
+    fmt = profile.message_formats.get("sync_player", "v0")
+    name = payload["name"]
+    if len(name) > profile.name_len:
+        print(f"Name too long, trimming to {profile.name_len} chars.")
+        name = name[: profile.name_len]
+
+    hide_vis = payload.get("hide_visuals", 0) & 0xFF
+    hide_vis2 = payload.get("hide_visuals_2", 0) & 0xFF
+    hide_vis_mask = hide_vis | (hide_vis2 << 8)
+
+    base = bytearray()
+    base.append(payload["player_id"] & 0xFF)
+
+    if fmt == "v1":
+        base.append(payload.get("skin_variant", 0) & 0xFF)
+        base.append(payload.get("voice_variant", 1) & 0xFF)
+        base.extend(struct.pack("<f", payload.get("voice_pitch_offset", 0.0)))
+        base.append(payload.get("hair", 0) & 0xFF)
+    else:
+        base.append(payload.get("skin_variant", 0) & 0xFF)
+        base.append(payload.get("hair", 0) & 0xFF)
+
+    base.extend(write_dotnet_string(name))
+    base.append(payload.get("hair_dye", 0) & 0xFF)
+    base.extend(struct.pack("<H", hide_vis_mask))
+    base.append(payload.get("hide_misc", 0) & 0xFF)
+    base.extend(_pack_color(payload["hair_color"]))
+    base.extend(_pack_color(payload["skin_color"]))
+    base.extend(_pack_color(payload["eye_color"]))
+    base.extend(_pack_color(payload["shirt_color"]))
+    base.extend(_pack_color(payload["undershirt_color"]))
+    base.extend(_pack_color(payload["pants_color"]))
+    base.extend(_pack_color(payload["shoe_color"]))
+    base.append(payload.get("difficulty_flags", 0) & 0xFF)
+    base.append(payload.get("torch_flags", 0) & 0xFF)
+    base.append(payload.get("shimmer_flags", 0) & 0xFF)
+
+    return build_raw_packet(0x04, bytes(base))
+
+
+def build_sync_equipment_packet(profile: VersionSpec, payload: dict) -> bytes:
+    fmt = profile.message_formats.get("sync_equipment", "v0")
+    base = bytearray()
+    base.append(payload["player_slot"] & 0xFF)
+    base.extend(struct.pack("<h", payload["inventory_slot"]))
+    base.extend(struct.pack("<h", payload["stack"]))
+    base.append(payload["prefix_id"] & 0xFF)
+    base.extend(struct.pack("<h", payload["item_id"]))
+    if fmt == "v1":
+        base.append(payload.get("flags", 0) & 0xFF)
+    return build_raw_packet(0x05, bytes(base))
+
+
+def build_player_buffs_packet(profile: VersionSpec, player_slot: int, buffs=None) -> bytes:
+    fmt = profile.message_formats.get("player_buffs", "v0")
+    base = bytearray()
+    base.append(player_slot & 0xFF)
+    if fmt == "v1":
+        # v1: sequence of UInt16 buff IDs terminated by 0
+        buffs = buffs or []
+        for buff_id in buffs:
+            base.extend(struct.pack("<H", buff_id))
+        base.extend(struct.pack("<H", 0))
+    else:
+        # v0: fixed-size array (default 44)
+        if buffs is None:
+            buffs = [0] * 44
+        for buff_id in buffs:
+            base.extend(struct.pack("<H", buff_id))
+    return build_raw_packet(0x32, bytes(base))
 
 
 class TerrariaClient:
@@ -494,6 +627,8 @@ class TerrariaClient:
         chat_text: str = "hello",
         uuid: Optional[str] = None,
         profile: VersionSpec | None = None,
+        inventory_count: int = 59,
+        worldinfo_retry: float = 2.0,
     ):
         self.host = host
         self.port = port
@@ -505,6 +640,8 @@ class TerrariaClient:
             or f"{random.randrange(16**8):08x}-dead-beef-cafe-{random.randrange(16**12):012x}"
         )
         self.profile = profile
+        self.inventory_count = inventory_count
+        self.worldinfo_retry = worldinfo_retry
 
     def login(self):
         with socket.create_connection((self.host, self.port)) as s:
@@ -529,30 +666,29 @@ class TerrariaClient:
             print(f"Connection Approved: slot={msg.payload.player_slot}")
 
             # $04 Player Appearance
-            send(
-                s,
-                0x04,
-                {
-                    "player_id": 0,
-                    "skin_variant": 4,
-                    "hair": 22,
-                    "name": self.name,
-                    "hair_dye": 0,
-                    "hide_visuals": 0,
-                    "hide_visuals_2": 0,
-                    "hide_misc": 0,
-                    "hair_color": {"r": 0, "g": 0, "b": 0},
-                    "skin_color": {"r": 255, "g": 224, "b": 189},
-                    "eye_color": {"r": 64, "g": 64, "b": 64},
-                    "shirt_color": {"r": 100, "g": 100, "b": 100},
-                    "undershirt_color": {"r": 100, "g": 100, "b": 100},
-                    "pants_color": {"r": 100, "g": 100, "b": 100},
-                    "shoe_color": {"r": 50, "g": 50, "b": 50},
-                    "difficulty_flags": 4,
-                    "torch_flags": 24,
-                    "shimmer_flags": 0,
-                },
-            )
+            sync_player_payload = {
+                "player_id": 0,
+                "skin_variant": 4,
+                "voice_variant": 1,
+                "voice_pitch_offset": 0.0,
+                "hair": 22,
+                "name": self.name,
+                "hair_dye": 0,
+                "hide_visuals": 0,
+                "hide_visuals_2": 0,
+                "hide_misc": 0,
+                "hair_color": {"r": 0, "g": 0, "b": 0},
+                "skin_color": {"r": 255, "g": 224, "b": 189},
+                "eye_color": {"r": 64, "g": 64, "b": 64},
+                "shirt_color": {"r": 100, "g": 100, "b": 100},
+                "undershirt_color": {"r": 100, "g": 100, "b": 100},
+                "pants_color": {"r": 100, "g": 100, "b": 100},
+                "shoe_color": {"r": 50, "g": 50, "b": 50},
+                "difficulty_flags": 4,
+                "torch_flags": 24,
+                "shimmer_flags": 0,
+            }
+            send_raw(s, build_sync_player_packet(profile, sync_player_payload))
             print("Player Appearance")
 
             # send client uuid
@@ -561,24 +697,27 @@ class TerrariaClient:
             # $10 Life, $2A Mana, $32 Buffs (응답 기다리지 않고 전송) (https://seancode.com/terrafirma/net.html)
             send(s, 0x10, {"player_slot": 0, "current_health": 500, "max_health": 500})
             send(s, 0x2A, {"player_slot": 0, "mana": 200, "max_mana": 200})
-            send(s, 0x32, {"player_slot": 0, "buffs": [0] * 44})
+            send_raw(s, build_player_buffs_packet(profile, player_slot=0, buffs=[]))
             print("Life, Mana, Buffs")
 
             # Loadout (0x93 == 147)
             send(s, 0x93, {"loadout": [0, 0, 0, 0]})
 
             # 인벤토리 슬롯 0..72, $05 반복 전송 (https://seancode.com/terrafirma/net.html)
-            for inv in range(350):
-                send(
+            for inv in range(self.inventory_count):
+                send_raw(
                     s,
-                    0x05,
-                    {
-                        "player_slot": 0,
-                        "inventory_slot": inv,
-                        "stack": 0,
-                        "prefix_id": 0,
-                        "item_id": 0,  # 빈 슬롯
-                    },
+                    build_sync_equipment_packet(
+                        profile,
+                        {
+                            "player_slot": 0,
+                            "inventory_slot": inv,
+                            "stack": 0,
+                            "prefix_id": 0,
+                            "item_id": 0,
+                            "flags": 0,
+                        },
+                    ),
                 )
 
             print("Sent Inventory")
@@ -587,15 +726,28 @@ class TerrariaClient:
             print("World Info Requested")
             # 서버는 문제 있으면 $02로 킥. 정상이면 $07 응답 후 Initialized(2)로 승격 (https://seancode.com/terrafirma/net.html)
             world_info = None
-            while True:
-                msg = stream.recv_message()
-                if msg.type == 0x02:
-                    raise SystemExit(f"error: {msg.payload.error}")
-                if msg.type == 0x07:
-                    world_info = msg.payload
-                    break
-                if msg.type != 0x52:
-                    print(f"World Info Other response: {msg}")
+            last_worldinfo_send = time.time()
+            warn_at = time.time() + 5.0
+            while world_info is None:
+                msgs = stream.poll_messages()
+                if not msgs:
+                    if self.worldinfo_retry and time.time() - last_worldinfo_send > self.worldinfo_retry:
+                        print("Re-sending World Info request...")
+                        send(s, 0x06)
+                        last_worldinfo_send = time.time()
+                    if DEBUG and time.time() >= warn_at:
+                        print("Still waiting for world info...")
+                        warn_at = time.time() + 5.0
+                    time.sleep(0.01)
+                    continue
+                for msg in msgs:
+                    if msg.type == 0x02:
+                        raise SystemExit(f"error: {msg.payload.error}")
+                    if msg.type == 0x07:
+                        world_info = msg.payload
+                        break
+                    if msg.type != 0x52:
+                        print(f"World Info Other response: {msg}")
             print(f"World Info Response: {world_info}")
             # $08 초기 타일 데이터 요청. $07에서 받은 스폰 X,Y 사용 (https://seancode.com/terrafirma/net.html)
             send(
@@ -614,7 +766,7 @@ class TerrariaClient:
                 if msg.type == 0x0A:  # Tile section
                     try:
                         section = parse_tile_section(
-                            msg.payload.tile_data, profile.tile_frame_important
+                            msg.payload, profile.tile_frame_important
                         )
                         state.update_tile_section(section)
                     except Exception as e:
@@ -647,7 +799,7 @@ class TerrariaClient:
                 deaths_pvp=0,
                 spawn_context=0,
             )
-            s.sendall(spawn_packet)
+            send_raw(s, spawn_packet)
 
             # 이후 자유롭게 양방향 메시지 교환 가능
             # 예: 채팅 (NetModules/NetTextModule)
@@ -699,7 +851,26 @@ if __name__ == "__main__":
     parser.add_argument("--move-loop", action="store_true")
     parser.add_argument("--move-toggle", action="store_true")
     parser.add_argument("--move-toggle-interval", type=float, default=0.5)
+    parser.add_argument(
+        "--inventory-count",
+        type=int,
+        default=59,
+        help="Number of inventory slots to sync (default 59). Use 0 to skip.",
+    )
+    parser.add_argument(
+        "--worldinfo-retry",
+        type=float,
+        default=2.0,
+        help="Seconds between re-sending world info request (0 to disable).",
+    )
+    parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--debug-hex", action="store_true")
+    parser.add_argument("--debug-tiles", action="store_true")
     args = parser.parse_args()
+
+    DEBUG = args.debug
+    DEBUG_HEX = args.debug_hex
+    DEBUG_INCLUDE_TILES = args.debug_tiles
 
     repo_root = Path(__file__).resolve().parent
     profile = resolve_spec(
@@ -713,6 +884,8 @@ if __name__ == "__main__":
         chat_text=args.chat,
         uuid=args.uuid,
         profile=profile,
+        inventory_count=args.inventory_count,
+        worldinfo_retry=args.worldinfo_retry,
     )
     client.move_right = args.move_right
     client.move_seconds = 0.0 if args.move_loop else args.move_seconds

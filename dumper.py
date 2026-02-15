@@ -13,6 +13,28 @@ construct.setGlobalPrintFullStrings(True)
 # construct.setGlobalPrintLimit(0)
 
 
+def read_7bit_int(stream: io.BytesIO) -> int:
+    result = 0
+    shift = 0
+    while True:
+        b = stream.read(1)
+        if not b:
+            raise EOFError("unexpected EOF while reading 7-bit int")
+        byte = b[0]
+        result |= (byte & 0x7F) << shift
+        if (byte & 0x80) == 0:
+            return result
+        shift += 7
+        if shift > 35:
+            raise ValueError("7-bit int too large")
+
+
+def read_dotnet_string(stream: io.BytesIO) -> str:
+    length = read_7bit_int(stream)
+    data = stream.read(length)
+    return data.decode("utf-8", errors="replace")
+
+
 class PacketDumper:
     def __init__(self, prefix):
         self.prefix = prefix
@@ -47,6 +69,23 @@ class PacketDumper:
                     if stream.tell() != len(payload):
                         print(f"!! leftover {len(payload)-stream.tell()} bytes")
                         print(f"raw: {binascii.hexlify(stream.getvalue()).decode()}")
+
+                    # NetModules (0x52) - decode NetTextModule (id=1)
+                    if msg_type == 0x52 and hasattr(parsed, "module_id"):
+                        module_id = parsed.module_id
+                        if module_id == 1:
+                            try:
+                                mstream = io.BytesIO(parsed.module_payload)
+                                command = read_dotnet_string(mstream)
+                                text = read_dotnet_string(mstream)
+                                parsed = {
+                                    "module_id": module_id,
+                                    "module": "NetTextModule",
+                                    "command": command,
+                                    "text": text,
+                                }
+                            except Exception as e:
+                                parsed = f"<nettext parse error: {e}>"
                 except Exception as e:
                     parsed = f"<parse error: {e}>"
             else:

@@ -2,8 +2,8 @@
 Construct-based definitions of Terraria network protocol messages.
 
 This module defines Python constructs for each message type in the Terraria network protocol,
-as documented on the seancode.com TerraFirma network protocol page【588973514146224†L150-L199】【588973514146224†L420-L423】. Each message begins with a 4‑byte little‑endian
-length field (the number of bytes following the length), followed by a 1‑byte message
+as documented on the seancode.com TerraFirma network protocol page【588973514146224†L150-L199】【588973514146224†L420-L423】. Each message begins with a 2‑byte little‑endian
+length field (the total packet length, including the length field), followed by a 1‑byte message
 ID, and then a payload whose structure depends on the message ID.  The definitions
 below model only the payloads; a general message parser at the end combines the
 length, ID and payload to parse complete packets.  Strings use ASCII and are read to
@@ -222,22 +222,41 @@ payload_structs = {
         "end_x" / Int32sl,
         "end_y" / Int32sl,
     ),
-    # $0C — Spawn Player【588973514146224†L290-L300】
+    # $0C — Spawn Player (1.4.4.9 server)
     0x0C: Struct(
         "player_slot" / Byte,
-        "spawn_x" / Int32sl,
-        "spawn_y" / Int32sl,
+        "spawn_x" / Int16sl,
+        "spawn_y" / Int16sl,
+        "respawn_timer" / Int32sl,
+        "deaths_pve" / Int16sl,
+        "deaths_pvp" / Int16sl,
+        "spawn_context" / Byte,
     ),
-    # $0D — Player Control【588973514146224†L311-L334】
+    # $0D — Player Control (1.4.4.9 server)
     0x0D: Struct(
         "player_slot" / Byte,
-        "control_flags" / Byte,
-        "selected_item_slot" / Byte,
+        "flags1" / Byte,
+        "flags2" / Byte,
+        "flags3" / Byte,
+        "flags4" / Byte,
+        "selected_item" / Byte,
         "position_x" / Float32l,
         "position_y" / Float32l,
-        "velocity_x" / Float32l,
-        "velocity_y" / Float32l,
-        "flags" / Byte,
+        "velocity"
+        / If(
+            lambda this: (this.flags2 & 0b00000100) != 0,
+            Struct("x" / Float32l, "y" / Float32l),
+        ),
+        "potion_return"
+        / If(
+            lambda this: (this.flags3 & 0b01000000) != 0,
+            Struct(
+                "orig_x" / Float32l,
+                "orig_y" / Float32l,
+                "home_x" / Float32l,
+                "home_y" / Float32l,
+            ),
+        ),
     ),
     # $0E — Set Player Activity【588973514146224†L351-L359】
     0x0E: Struct(
@@ -578,7 +597,8 @@ payload_structs = {
         "client_uuid" / PascalString(lengthfield=Byte, encoding="ascii"),
     ),
     0x52: Struct(
-        "network_something" / Array(4, Byte),
+        "module_id" / Int16ul,
+        "module_payload" / GreedyBytes,
     ),
     0x93: Struct(
         "loadout" / Array(4, Byte),
@@ -589,10 +609,9 @@ payload_structs = {
 # General packet structure
 # -------------------------------------------------------------------------------
 
-# Parses a complete Terraria message consisting of a 4‑byte length, 1‑byte message
-# type and a payload.  The message length includes the type and payload bytes but
-# excludes the 4‑byte length prefix【588973514146224†L27-L33】.  FixedSized ensures that the
-# payload parser consumes exactly (length ‑ 1) bytes for the chosen message type.
+# Parses a complete Terraria message consisting of a 2‑byte length, 1‑byte message
+# type and a payload. The length includes the 2‑byte prefix itself (2 + 1 + payload).
+# FixedSized ensures that the payload parser consumes exactly (length - 3) bytes.
 TerrariaMessage = Struct(
     "length" / Int16ul,
     "type" / Byte,

@@ -1,0 +1,10 @@
+{
+  "profile": "1455",
+  "base_dir": "1455",
+  "decomp_dir": "1.4.5.5-Windows-Server",
+  "version_string": null,
+  "message_formats": {
+    "player_spawn": "v1",
+    "player_controls": "v1"
+  }
+}

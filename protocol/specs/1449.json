@@ -1,0 +1,10 @@
+{
+  "profile": "1449",
+  "base_dir": "1449",
+  "decomp_dir": "1.4.4.9-279-Windows-Server",
+  "version_string": "Terraria279",
+  "message_formats": {
+    "player_spawn": "v1",
+    "player_controls": "v1"
+  }
+}

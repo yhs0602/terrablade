@@ -11,6 +11,12 @@ from typing import Optional
 from types import SimpleNamespace
 from terraria_construct import payload_structs, TerrariaMessage
 from protocol import VersionSpec, resolve_spec
+from bot.exploration import (
+    ExplorationBot,
+    Observation,
+    ExplorationConfig,
+    Action,
+)
 
 HOST, PORT = "127.0.0.1", 7777
 NET_TEXT_MODULE_ID = 1  # NetworkInitializer: NetLiquidModule(0), NetTextModule(1)
@@ -626,6 +632,7 @@ def build_player_controls_packet(
     send_velocity: bool = False,
     vel_x: float = 0.0,
     vel_y: float = 0.0,
+    grav_dir: int = 1,
 ) -> bytes:
     fmt = profile.message_formats.get("player_controls", "v1")
     if fmt == "v0":
@@ -662,6 +669,7 @@ def build_player_controls_packet(
 
     flags2 = 0
     flags2 |= int(send_velocity) << 2
+    flags2 |= int(grav_dir == 1) << 4
 
     flags3 = 0
     flags4 = 0
@@ -785,9 +793,7 @@ def move_right_loop(
                     )
             elif msg.type == 0x97:
                 item_slot = getattr(msg.payload, "item_slot", None)
-                if item_slot is None and isinstance(
-                    msg.payload, (bytes, bytearray)
-                ):
+                if item_slot is None and isinstance(msg.payload, (bytes, bytearray)):
                     if len(msg.payload) >= 2:
                         item_slot = struct.unpack("<h", msg.payload[:2])[0]
                 if item_slot is not None:
@@ -1023,9 +1029,7 @@ def idle_loop(
                     )
             elif msg.type == 0x97:
                 item_slot = getattr(msg.payload, "item_slot", None)
-                if item_slot is None and isinstance(
-                    msg.payload, (bytes, bytearray)
-                ):
+                if item_slot is None and isinstance(msg.payload, (bytes, bytearray)):
                     if len(msg.payload) >= 2:
                         item_slot = struct.unpack("<h", msg.payload[:2])[0]
                 if item_slot is not None:
@@ -1109,6 +1113,253 @@ def idle_loop(
             send_raw(sock, packet)
             last_send = now
         time.sleep(0.01)
+
+
+def explore_loop(
+    sock,
+    stream: PacketStream,
+    state: WorldState,
+    profile: VersionSpec,
+    player_slot: int,
+    bot: ExplorationBot,
+    interval: float,
+    sense_radius: int,
+    teleport_tracker: TeleportTracker | None = None,
+    inventory: InventoryState | None = None,
+    auto_pickup: bool = True,
+    pickup_radius: float | None = None,
+):
+    tick = 1.0 / 60.0
+    last_decide = 0.0
+    action = Action()
+    x = 0.0
+    y = 0.0
+    vx = 0.0
+    vy = 0.0
+    on_ground = False
+    max_run = 64.0 / 60.0
+    accel = 0.1
+    friction = 0.05
+    gravity = 0.3
+    max_fall = 10.0
+    player_width = 20
+    player_height = 42
+    if teleport_tracker is None:
+        teleport_tracker = TeleportTracker()
+    if inventory is None:
+        inventory = InventoryState(59)
+    while True:
+        for msg in stream.poll_messages():
+            if msg.type == 0x0A:
+                try:
+                    section = parse_tile_section(
+                        msg.payload, profile.tile_frame_important
+                    )
+                    state.update_tile_section(section)
+                except Exception as e:
+                    print(f"Tile section parse failed: {e}")
+            elif msg.type == 0x15:
+                state.update_item(msg.payload)
+            elif msg.type == 0x16:
+                state.update_item_owner(msg.payload.item_slot, msg.payload.owner)
+                if msg.payload.owner == player_slot:
+                    print(f"Picked up item slot={msg.payload.item_slot}")
+                if auto_pickup:
+                    try_pickup_reserved_items(
+                        sock,
+                        state,
+                        inventory,
+                        profile,
+                        player_slot,
+                        state.player_pos.get(player_slot) or (x, y),
+                        radius_px=pickup_radius,
+                    )
+            elif msg.type == 0x97:
+                item_slot = getattr(msg.payload, "item_slot", None)
+                if item_slot is None and isinstance(msg.payload, (bytes, bytearray)):
+                    if len(msg.payload) >= 2:
+                        item_slot = struct.unpack("<h", msg.payload[:2])[0]
+                if item_slot is not None:
+                    state.remove_item(item_slot)
+            elif msg.type == 0x17:
+                state.update_npc(msg.payload)
+            elif msg.type == 0x1A and msg.payload.player_slot == player_slot:
+                print(
+                    f"Took damage: dmg={msg.payload.damage} crit={msg.payload.critical}"
+                )
+            elif msg.type == 0x2C and msg.payload.player_slot == player_slot:
+                print(
+                    f"Killed: dmg={msg.payload.damage} dir={msg.payload.hit_direction}"
+                )
+            elif msg.type == 0x75:
+                info = decode_player_hurt_v2(msg.payload)
+                if info["player_slot"] == player_slot:
+                    print(
+                        f"Took damage(v2): dmg={info['damage']} crit={info['crit']} pvp={info['pvp']} dir={info['hit_dir']}"
+                    )
+            elif msg.type == 0x76:
+                info = decode_player_death_v2(msg.payload)
+                if info["player_slot"] == player_slot:
+                    print(
+                        f"Killed(v2): dmg={info['damage']} pvp={info['pvp']} dir={info['hit_dir']}"
+                    )
+            elif msg.type == 0x0D and msg.payload.player_slot == player_slot:
+                x = msg.payload.position_x
+                y = msg.payload.position_y
+                state.update_player_pos(player_slot, x, y)
+            elif msg.type == 0x41:
+                info = decode_teleport(msg.payload)
+                if info["mode"] in (0, 2):
+                    if teleport_tracker.sent(info["target"]):
+                        print(
+                            f"Teleport pending: target={info['target']} pending={teleport_tracker.status()}"
+                        )
+                    if info["target"] == player_slot:
+                        send_raw(sock, build_teleport_ack_packet(info["target"]))
+                        if teleport_tracker.ack(info["target"]):
+                            print(
+                                f"Teleport acked: target={info['target']} pending={teleport_tracker.status()}"
+                            )
+                elif info["mode"] == 3:
+                    if teleport_tracker.ack(info["target"]):
+                        print(
+                            f"Teleport acked: target={info['target']} pending={teleport_tracker.status()}"
+                        )
+                print(
+                    "Teleport packet: "
+                    f"flags_raw=0x{info['flags_raw']:02X} flags={info['flags']} "
+                    f"target={info['target']} pos=({info['x']:.2f},{info['y']:.2f}) "
+                    f"style={info['style']} extra={info['extra']}"
+                )
+
+        now = time.time()
+        if interval <= 0 or now - last_decide >= interval:
+            pos = state.player_pos.get(player_slot) or (x, y)
+            x, y = pos
+            obs = Observation(
+                player_pos=pos,
+                nearby_tiles=state.get_nearby_tiles(x, y, radius_tiles=sense_radius),
+                nearby_items=state.get_nearby_items(x, y),
+                nearby_npcs=state.get_nearby_npcs(x, y),
+            )
+            action = bot.decide(obs)
+            last_decide = now
+
+        # physics step driven by current action
+        if action.move_right and not action.move_left:
+            vx = min(max_run, vx + accel)
+        elif action.move_left and not action.move_right:
+            vx = max(-max_run, vx - accel)
+        else:
+            if vx > 0:
+                vx = max(0.0, vx - friction)
+            elif vx < 0:
+                vx = min(0.0, vx + friction)
+
+        if action.jump and on_ground:
+            vy = -5.5
+            on_ground = False
+        vy = min(max_fall, vy + gravity)
+
+        # move X with collision
+        new_x = x + vx
+        if vx > 0:
+            top = int(y // 16)
+            bottom = int((y + player_height - 1) // 16)
+            start_tx = int((x + player_width - 1) // 16) + 1
+            end_tx = int((new_x + player_width - 1) // 16)
+            collided = False
+            for tx in range(start_tx, end_tx + 1):
+                for ty in range(top, bottom + 1):
+                    if state.is_solid(tx, ty):
+                        new_x = tx * 16 - player_width
+                        vx = 0.0
+                        collided = True
+                        break
+                if collided:
+                    break
+        elif vx < 0:
+            top = int(y // 16)
+            bottom = int((y + player_height - 1) // 16)
+            start_tx = int(x // 16) - 1
+            end_tx = int(new_x // 16)
+            collided = False
+            for tx in range(start_tx, end_tx - 1, -1):
+                for ty in range(top, bottom + 1):
+                    if state.is_solid(tx, ty):
+                        new_x = (tx + 1) * 16
+                        vx = 0.0
+                        collided = True
+                        break
+                if collided:
+                    break
+        x = new_x
+
+        # move Y with collision
+        new_y = y + vy
+        on_ground = False
+        if vy > 0:
+            left = int(x // 16)
+            right = int((x + player_width - 1) // 16)
+            start_ty = int((y + player_height - 1) // 16) + 1
+            end_ty = int((new_y + player_height - 1) // 16)
+            collided = False
+            for ty in range(start_ty, end_ty + 1):
+                for tx in range(left, right + 1):
+                    if state.is_solid(tx, ty):
+                        new_y = ty * 16 - player_height
+                        vy = 0.0
+                        on_ground = True
+                        collided = True
+                        break
+                if collided:
+                    break
+        elif vy < 0:
+            left = int(x // 16)
+            right = int((x + player_width - 1) // 16)
+            start_ty = int(y // 16) - 1
+            end_ty = int(new_y // 16)
+            collided = False
+            for ty in range(start_ty, end_ty - 1, -1):
+                for tx in range(left, right + 1):
+                    if state.is_solid(tx, ty):
+                        new_y = (ty + 1) * 16
+                        vy = 0.0
+                        collided = True
+                        break
+                if collided:
+                    break
+        y = new_y
+        state.update_player_pos(player_slot, x, y)
+
+        if auto_pickup and inventory and player_slot in state.player_pos:
+            try_pickup_reserved_items(
+                sock,
+                state,
+                inventory,
+                profile,
+                player_slot,
+                state.player_pos.get(player_slot),
+                radius_px=pickup_radius,
+            )
+
+        packet = build_player_controls_packet(
+            profile,
+            player_slot=player_slot,
+            x=x,
+            y=y,
+            control_left=action.move_left,
+            control_right=action.move_right,
+            control_jump=action.jump,
+            control_use_item=action.use_item,
+            direction=action.direction,
+            selected_item=action.selected_item,
+            send_velocity=True,
+            vel_x=vx,
+            vel_y=vy,
+        )
+        send_raw(sock, packet)
+        time.sleep(tick)
 
 
 def send_chat(sock, text: str):
@@ -1244,7 +1495,9 @@ def try_pickup_reserved_items(
             del state.items[item_slot]
 
 
-def build_player_buffs_packet(profile: VersionSpec, player_slot: int, buffs=None) -> bytes:
+def build_player_buffs_packet(
+    profile: VersionSpec, player_slot: int, buffs=None
+) -> bytes:
     fmt = profile.message_formats.get("player_buffs", "v0")
     base = bytearray()
     base.append(player_slot & 0xFF)
@@ -1276,7 +1529,7 @@ class TerrariaClient:
         inventory_count: int = 59,
         worldinfo_retry: float = 2.0,
         auto_pickup: bool = True,
-        pickup_radius: float | None = 64.0,
+        pickup_radius: float | None = 42.0,
     ):
         self.host = host
         self.port = port
@@ -1395,7 +1648,10 @@ class TerrariaClient:
             while world_info is None:
                 msgs = stream.poll_messages()
                 if not msgs:
-                    if self.worldinfo_retry and time.time() - last_worldinfo_send > self.worldinfo_retry:
+                    if (
+                        self.worldinfo_retry
+                        and time.time() - last_worldinfo_send > self.worldinfo_retry
+                    ):
                         print("Re-sending World Info request...")
                         send(s, 0x06)
                         last_worldinfo_send = time.time()
@@ -1545,7 +1801,28 @@ class TerrariaClient:
             )
 
             # 간단한 이동 AI: 오른쪽으로만 이동
-            if getattr(self, "move_right", False):
+            if getattr(self, "explore", False):
+                bot = ExplorationBot(
+                    ExplorationConfig(
+                        prefer_right=not getattr(self, "explore_left", False),
+                        jump_if_blocked=True,
+                    )
+                )
+                explore_loop(
+                    s,
+                    stream,
+                    state,
+                    profile,
+                    player_slot=player_slot,
+                    bot=bot,
+                    interval=self.explore_interval,
+                    sense_radius=self.explore_radius,
+                    teleport_tracker=teleport_tracker,
+                    inventory=inventory,
+                    auto_pickup=self.auto_pickup,
+                    pickup_radius=self.pickup_radius,
+                )
+            elif getattr(self, "move_right", False):
                 start_x = world_info.spawn_tile_x * 16.0
                 start_y = world_info.spawn_tile_y * 16.0
                 time.sleep(0.5)
@@ -1587,9 +1864,7 @@ class TerrariaClient:
                 tiles = state.get_nearby_tiles(x, y, radius_tiles=self.sense_radius)
                 items = state.get_nearby_items(x, y)
                 npcs = state.get_nearby_npcs(x, y)
-                print(
-                    f"Sense: tiles={len(tiles)} items={len(items)} npcs={len(npcs)}"
-                )
+                print(f"Sense: tiles={len(tiles)} items={len(items)} npcs={len(npcs)}")
 
             if getattr(self, "dump_state", False):
                 dump_state(
@@ -1637,6 +1912,10 @@ if __name__ == "__main__":
     parser.add_argument("--move-loop", action="store_true")
     parser.add_argument("--move-toggle", action="store_true")
     parser.add_argument("--move-toggle-interval", type=float, default=0.5)
+    parser.add_argument("--explore", action="store_true")
+    parser.add_argument("--explore-left", action="store_true")
+    parser.add_argument("--explore-interval", type=float, default=0.1)
+    parser.add_argument("--explore-radius", type=int, default=6)
     parser.add_argument(
         "--no-physics",
         action="store_true",
@@ -1654,8 +1933,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--pickup-radius",
         type=float,
-        default=64.0,
-        help="Auto-pickup radius in pixels (-1 = no distance check).",
+        default=42.0,
+        help="Auto-pickup radius in pixels (-1 = no distance check). Default matches client grab range.",
     )
     parser.add_argument(
         "--no-pickup",
@@ -1711,6 +1990,10 @@ if __name__ == "__main__":
     client.move_speed = args.move_speed
     client.move_toggle = args.move_toggle
     client.move_toggle_interval = args.move_toggle_interval
+    client.explore = args.explore
+    client.explore_left = args.explore_left
+    client.explore_interval = args.explore_interval
+    client.explore_radius = args.explore_radius
     client.use_physics = not args.no_physics
     client.stay_connected = args.stay
     client.idle_interval = args.idle_interval

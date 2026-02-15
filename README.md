@@ -15,6 +15,7 @@
 - `server.log`, `dump.log`, `dump2.log`: 덤프 결과 로그
 - `TerrariaSourceGetter`: 테라리아 소스코드 디컴파일 도구
 - `1449/1.4.4.9-279-Windows-Server/`: 바닐라 테라리아 서버(1.4.4.9) 디컴파일 결과
+- `1455/1.4.5.5-Windows-Server/`: 바닐라 테라리아 서버(1.4.5.5) 디컴파일 결과
 - `tools/tsg_headless.cs`: 콘솔 환경에서 디컴파일을 자동 수행하는 보조 스크립트
 
 ## 진행 계획
@@ -40,6 +41,18 @@
 ## 문서
 - `docs/protocol_overview.md`: 프로토콜 프레이밍/핸드셰이크 요약
 - `docs/client_api.md`: 프로그램 제어 가능한 클라이언트 API 설계 초안
+- `docs/versioning.md`: 멀티버전(1449/1455) 지원 구조 및 스펙
+
+## 멀티버전 지원
+이 프로젝트는 `protocol/specs/*.json` 스펙을 통해 버전별 차이를 분리합니다.
+- `protocol/specs/1449.json`
+- `protocol/specs/1455.json`
+
+실행 시 `--profile`로 버전을 선택합니다.
+```bash
+python main.py --profile 1449 --move-right --chat "hello"
+python main.py --profile 1455 --move-right --chat "hello"
+```
 
 ## 디컴파일 재현 (선택)
 ```bash

@@ -94,14 +94,14 @@ class ByteReader:
         return read_dotnet_string(self)
 
 
-
-
 def parse_tile_section(payload: bytes, tile_frame_important: set[int]):
     # 0x0A payload is deflate-compressed
     global _WARNED_FRAME_IMPORTANT
     if not tile_frame_important:
         if not _WARNED_FRAME_IMPORTANT:
-            print("Warning: tileFrameImportant list missing; skipping tile parse (store no tiles).")
+            print(
+                "Warning: tileFrameImportant list missing; skipping tile parse (store no tiles)."
+            )
             _WARNED_FRAME_IMPORTANT = True
         data = zlib.decompress(payload, wbits=-15)
         r = ByteReader(data)
@@ -500,7 +500,10 @@ class TerrariaClient:
         self.password = password
         self.name = name
         self.chat_text = chat_text
-        self.uuid = uuid or f"{random.randrange(16**8):08x}-dead-beef-cafe-{random.randrange(16**12):012x}"
+        self.uuid = (
+            uuid
+            or f"{random.randrange(16**8):08x}-dead-beef-cafe-{random.randrange(16**12):012x}"
+        )
         self.profile = profile
 
     def login(self):
@@ -650,7 +653,9 @@ class TerrariaClient:
             # 예: 채팅 (NetModules/NetTextModule)
             send_chat(s, self.chat_text)
             print(f"Chat sent: {self.chat_text}")
-            print(f"Tiles loaded: {state.tile_sections}, entities: items={len(state.items)} npcs={len(state.npcs)}")
+            print(
+                f"Tiles loaded: {state.tile_sections}, entities: items={len(state.items)} npcs={len(state.npcs)}"
+            )
 
             # 간단한 이동 AI: 오른쪽으로만 이동
             if getattr(self, "move_right", False):
@@ -682,8 +687,12 @@ if __name__ == "__main__":
     parser.add_argument("--chat", default="hello")
     parser.add_argument("--uuid", default=None)
     parser.add_argument("--profile", default="1449", help="e.g. 1449 or 1455")
-    parser.add_argument("--decomp-dir", default=None, help="Override decompiled source dir")
-    parser.add_argument("--version-string", default=None, help="Override Hello version string")
+    parser.add_argument(
+        "--decomp-dir", default=None, help="Override decompiled source dir"
+    )
+    parser.add_argument(
+        "--version-string", default=None, help="Override Hello version string"
+    )
     parser.add_argument("--move-right", action="store_true")
     parser.add_argument("--move-seconds", type=float, default=5.0)
     parser.add_argument("--move-speed", type=float, default=64.0)

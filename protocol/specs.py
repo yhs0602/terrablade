@@ -24,27 +24,36 @@ def _infer_version_string(decomp_dir: Path) -> Optional[str]:
     if not netmessage.exists():
         return None
     text = netmessage.read_text(encoding="utf-8", errors="ignore")
-    m = re.search(r'writer\\.Write\\(\"Terraria\" \\+ (\\d+)\\)', text)
+    m = re.search(r"writer\\.Write\\(\"Terraria\" \\+ (\\d+)\\)", text)
     if not m:
         return None
     return f"Terraria{m.group(1)}"
 
 
-def _load_tile_frame_important(profile_name: str, decomp_dir: Path, data_dir: Path) -> set[int]:
+def _load_tile_frame_important(
+    profile_name: str, decomp_dir: Path, data_dir: Path
+) -> set[int]:
     cache_path = data_dir / f"tile_frame_important_{profile_name}.txt"
     if cache_path.exists():
         text = cache_path.read_text(encoding="utf-8", errors="ignore")
-        ids = {int(line.strip()) for line in text.splitlines() if line.strip().isdigit()}
+        ids = {
+            int(line.strip()) for line in text.splitlines() if line.strip().isdigit()
+        }
         if ids:
             return ids
 
     main_cs = decomp_dir / "Terraria" / "Main.cs"
     if main_cs.exists():
         text = main_cs.read_text(encoding="utf-8", errors="ignore")
-        ids = {int(m.group(1)) for m in re.finditer(r"tileFrameImportant\\[(\\d+)\\] = true;", text)}
+        ids = {
+            int(m.group(1))
+            for m in re.finditer(r"tileFrameImportant\\[(\\d+)\\] = true;", text)
+        }
         if ids:
             data_dir.mkdir(exist_ok=True)
-            cache_path.write_text("\n".join(map(str, sorted(ids))) + "\n", encoding="utf-8")
+            cache_path.write_text(
+                "\n".join(map(str, sorted(ids))) + "\n", encoding="utf-8"
+            )
             return ids
 
     return set()

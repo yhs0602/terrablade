@@ -1,4 +1,4 @@
-# Created by https://www.toptal.com/developers/gitignore/api/python,macos,visualstudiocode
+# Created by https://www.toptal.com/developers/gitignore/api/python,macos,visualstudiocodeG
 # Edit at https://www.toptal.com/developers/gitignore?templates=python,macos,visualstudiocode
 
 ### macOS ###
@@ -227,3 +227,4 @@ pyrightconfig.json
 # End of https://www.toptal.com/developers/gitignore/api/python,macos,visualstudiocode
 
 TerrariaSourceGetter
+tModloader-decomp

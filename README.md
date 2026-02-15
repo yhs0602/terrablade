@@ -16,7 +16,9 @@
 - `TerrariaSourceGetter`: 테라리아 소스코드 디컴파일 도구
 - `1449/1.4.4.9-279-Windows-Server/`: 바닐라 테라리아 서버(1.4.4.9) 디컴파일 결과
 - `1455/1.4.5.5-Windows-Server/`: 바닐라 테라리아 서버(1.4.5.5) 디컴파일 결과
+- `tModLoader-decomp/`: tModLoader 디컴파일 결과 (바닐라 로직 교차 참고용)
 - `tools/tsg_headless.cs`: 콘솔 환경에서 디컴파일을 자동 수행하는 보조 스크립트
+- `tools/decompile_tml.cs`: tModLoader.dll 디컴파일용 보조 도구
 
 ## 진행 계획
 1. **바닐라 테라리아 서버 소스코드 확보**
@@ -42,6 +44,7 @@
 - `docs/protocol_overview.md`: 프로토콜 프레이밍/핸드셰이크 요약
 - `docs/client_api.md`: 프로그램 제어 가능한 클라이언트 API 설계 초안
 - `docs/versioning.md`: 멀티버전(1449/1455) 지원 구조 및 스펙
+- `docs/exploration_bot_plan.md`: 테라리아 탐험 봇 계획
 
 ## 멀티버전 지원
 이 프로젝트는 `protocol/specs/*.json` 스펙을 통해 버전별 차이를 분리합니다.

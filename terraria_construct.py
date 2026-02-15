@@ -263,14 +263,8 @@ payload_structs = {
         "current_health" / Int16sl,
         "max_health" / Int16sl,
     ),
-    # $11 — Modify Tile【588973514146224†L388-L416】
-    0x11: Struct(
-        "modify_mode" / Byte,
-        "tile_x" / Int32sl,
-        "tile_y" / Int32sl,
-        "tile_wall_id" / Byte,
-        "tile_variant" / Byte,
-    ),
+    # $11 — Modify Tile (variable payload in 1.4.4+)
+    0x11: GreedyBytes,
     # $12 — Set Time【588973514146224†L425-L436】
     0x12: Struct(
         "day_night" / Byte,
@@ -358,19 +352,8 @@ payload_structs = {
         "critical" / Byte,
         "death_text" / PascalString(lengthfield=Byte, encoding="ascii"),
     ),
-    # $1B — Update Projectile【588973514146224†L627-L645】
-    0x1B: Struct(
-        "projectile_id" / Int16sl,
-        "position_x" / Float32l,
-        "position_y" / Float32l,
-        "velocity_x" / Float32l,
-        "velocity_y" / Float32l,
-        "knockback" / Float32l,
-        "damage" / Int16sl,
-        "owner" / Byte,
-        "projectile_type" / Int16sl,
-        "ai" / Array(4, Float32l),
-    ),
+    # $1B — Update Projectile (variable payload in 1.4.4+)
+    0x1B: GreedyBytes,
     # $1C — Damage NPC【588973514146224†L656-L669】
     0x1C: Struct(
         "npc_slot" / Int16sl,
@@ -489,11 +472,8 @@ payload_structs = {
     ),
     # $31 — Spawn (no payload)【588973514146224†L1041-L1047】
     0x31: Struct(),
-    # $32 — Set Player Buffs【588973514146224†L1049-L1058】
-    0x32: Struct(
-        "player_slot" / Byte,
-        "buffs" / Array(44, Int16ul),
-    ),
+    # $32 — Set Player Buffs (variable payload in 1.4.4+)
+    0x32: GreedyBytes,
     # $33 — Old Man's Answer【588973514146224†L1071-L1080】
     0x33: Struct(
         "player_slot" / Byte,
@@ -572,13 +552,12 @@ payload_structs = {
         "wall_y" / Int32sl,
         "color" / Byte,
     ),
-    # $41 — Teleport Player/NPC【588973514146224†L1310-L1323】
-    0x41: Struct(
-        "flags" / Byte,
-        "player_slot" / Int16sl,
-        "destination_x" / Float32l,
-        "destination_y" / Float32l,
-    ),
+    # $41 — Teleport (player/npc) - parse as raw for custom decoder
+    0x41: GreedyBytes,
+    # $75 — Player Hurt V2 (variable payload)
+    0x75: GreedyBytes,
+    # $76 — Player Death V2 (variable payload)
+    0x76: GreedyBytes,
     # $42 — Heal Player【588973514146224†L1333-L1342】
     0x42: Struct(
         "player_slot" / Byte,
@@ -594,6 +573,10 @@ payload_structs = {
     ),
     0x93: Struct(
         "loadout" / Array(4, Byte),
+    ),
+    # $97 — Sync Item Despawn
+    0x97: Struct(
+        "item_slot" / Int16sl,
     ),
 }
 
